@@ -22,22 +22,25 @@ main() {
     else
       warn "删除任务响应: $resp"
     fi
-  else
-    warn "无压测任务 ID，尝试按名称查找..."
-    tid=$(api_get "/algorithm/task/list?pageNo=1&pageSize=50" | python3 -c "
+  fi
+
+  # 删除所有同名压测任务
+  while read -r tid; do
+    [[ -z "$tid" ]] && continue
+    api_post "/algorithm/task/${tid}/stop" '{}' >/dev/null 2>&1 || true
+    sleep 1
+    api_delete "/algorithm/task/${tid}" >/dev/null 2>&1 || true
+    log "已删除任务 ID=${tid}"
+  done < <(api_get "/algorithm/task/list?pageNo=1&pageSize=100" 120 | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 for t in d.get('data',[]):
     if '${TASK_NAME}' in str(t.get('task_name','')):
-        print(t['id']); break
+        print(t['id'])
 " 2>/dev/null || true)
-    if [[ -n "$tid" ]]; then
-      STRESS_TASK_ID="$tid"
-      api_post "/algorithm/task/${tid}/stop" '{}' >/dev/null 2>&1 || true
-      sleep 2
-      api_delete "/algorithm/task/${tid}" >/dev/null 2>&1 || true
-      log "已删除任务 ID=${tid}"
-    fi
+
+  if [[ -z "${STRESS_TASK_ID:-}" ]]; then
+    warn "无压测任务 ID，已按名称清理"
   fi
 
   ids=$(list_stress_device_ids)

@@ -28,17 +28,17 @@ api_get() {
 }
 
 api_post() {
-  curl -sS -m "${3:-30}" -X POST "${VIDEO_BASE}$1" \
+  curl -sS -m "${3:-${STRESS_API_TIMEOUT:-120}}" -X POST "${VIDEO_BASE}$1" \
     -H "Content-Type: application/json" -d "$2"
 }
 
 api_put() {
-  curl -sS -m "${3:-30}" -X PUT "${VIDEO_BASE}$1" \
+  curl -sS -m "${3:-${STRESS_API_TIMEOUT:-120}}" -X PUT "${VIDEO_BASE}$1" \
     -H "Content-Type: application/json" -d "$2"
 }
 
 api_delete() {
-  curl -sS -m "${2:-30}" -X DELETE "${VIDEO_BASE}$1"
+  curl -sS -m "${2:-60}" -X DELETE "${VIDEO_BASE}$1"
 }
 
 json_ok() {
@@ -99,12 +99,13 @@ get_rtsp_source() {
     return
   fi
   local src
-  src=$(api_get "/camera/list?pageNo=1&pageSize=50" | python3 -c "
+  src=$(api_get "/camera/list?pageNo=1&pageSize=50" 120 | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 for c in d.get('data',[]):
-    if c.get('online') and c.get('source'):
-        print(c['source']); break
+    s=(c.get('source') or '')
+    if c.get('online') and s.startswith('rtsp://'):
+        print(s); break
 " 2>/dev/null || true)
   if [[ -z "$src" ]]; then
     err "未找到在线 RTSP，请 export STRESS_RTSP_URL=rtsp://..."

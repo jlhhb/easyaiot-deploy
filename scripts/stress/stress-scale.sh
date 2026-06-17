@@ -31,8 +31,9 @@ print(sum(1 for c in d.get('data',[]) if str(c.get('name','')).startswith(pfx)))
     STRESS_RTSP_URL="${STRESS_RTSP_URL:-$(get_rtsp_source)}"
   fi
 
-  log "注册压测摄像头 ${current} -> ${need} ..."
-  local i name payload resp unique_source
+  log "注册压测摄像头 ${current} -> ${need} （分批，超时 ${STRESS_API_TIMEOUT:-120}s）..."
+  local i name payload resp unique_source batch=0
+  local batch_size="${STRESS_REGISTER_BATCH:-5}"
   for ((i = current + 1; i <= need; i++)); do
     name=$(printf "%s%03d" "$CAMERA_PREFIX" "$i")
     unique_source=$(stress_stream_source "$i")
@@ -47,13 +48,26 @@ print(json.dumps({
   'serial_number': 'STRESS-SN-${i}'
 }))
 ")
-    resp=$(api_post "/camera/register/device" "$payload")
+    local attempt=0
+    while [[ "$attempt" -lt 3 ]]; do
+      resp=$(api_post "/camera/register/device" "$payload")
+      if echo "$resp" | json_ok; then
+        break
+      fi
+      attempt=$((attempt + 1))
+      warn "注册 ${name} 重试 ${attempt}/3..."
+      sleep 3
+    done
     if ! echo "$resp" | json_ok; then
       err "注册 ${name} 失败: $resp"
       exit 1
     fi
-    [[ $((i % 10)) -eq 0 ]] && log "  已注册 ${i}/${need}"
-    sleep 0.2
+    batch=$((batch + 1))
+    if [[ "$batch" -ge "$batch_size" ]]; then
+      log "  已注册 ${i}/${need}"
+      batch=0
+      sleep 2
+    fi
   done
   REGISTERED_COUNT="$need"
   sleep_after_register "$need"
@@ -71,8 +85,8 @@ print(json.dumps(ids))
 
 sleep_after_register() {
   local n="$1"
-  local wait_sec=$(( 2 + n / 8 ))
-  [[ "$wait_sec" -gt 15 ]] && wait_sec=15
+  local wait_sec=$(( 5 + n / 4 ))
+  [[ "$wait_sec" -gt 30 ]] && wait_sec=30
   log "等待 ${wait_sec}s 设备入库..."
   sleep "$wait_sec"
 }

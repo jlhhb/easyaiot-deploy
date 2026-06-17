@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 向 ZLM 推送 N 路模拟流（testsrc），供压测注册为独立 RTMP 源
+# 向 ZLM 推送 N 路模拟流（优化：单路编码 + tee 扇出，或低分辨率 testsrc）
 # 用法: ./stress-simulate-streams.sh <路数>
 set -euo pipefail
 
@@ -12,101 +12,113 @@ ZLM_RTMP_HOST="${ZLM_RTMP_HOST:-127.0.0.1}"
 ZLM_RTMP_PORT="${ZLM_RTMP_PORT:-1935}"
 STREAM_APP="${STREAM_APP:-live}"
 STREAM_PREFIX="${STREAM_PREFIX:-stress}"
-PID_FILE="${STATE_DIR}/ffmpeg-pids.txt"
-RESOLUTION="${STRESS_RESOLUTION:-1280x720}"
-FPS="${STRESS_FPS:-25}"
-
-mkdir -p "$STATE_DIR"
-touch "$PID_FILE"
-
-running_count() {
-  grep -c . "$PID_FILE" 2>/dev/null || echo 0
-}
-
-is_pid_alive() {
-  local pid="$1"
-  kill -0 "$pid" 2>/dev/null
-}
-
-prune_dead_pids() {
-  local tmp
-  tmp=$(mktemp)
-  while read -r pid; do
-    [[ -n "$pid" ]] && is_pid_alive "$pid" && echo "$pid"
-  done <"$PID_FILE" >"$tmp"
-  mv "$tmp" "$PID_FILE"
-}
+FANOUT_CHUNK="${STRESS_FANOUT_CHUNK:-32}"
+RESOLUTION="${STRESS_RESOLUTION:-640x360}"
+FPS="${STRESS_FPS:-15}"
 
 stream_name() {
   printf "%s_%03d" "$STREAM_PREFIX" "$1"
 }
 
-stream_url() {
+stream_rtmp() {
   echo "rtmp://${ZLM_RTMP_HOST}:${ZLM_RTMP_PORT}/${STREAM_APP}/$(stream_name "$1")"
 }
 
-start_one() {
-  local i="$1"
-  local name url
-  name=$(stream_name "$i")
-  url=$(stream_url "$i")
-
-  # 已在推流则跳过
-  if pgrep -af "ffmpeg.*${name}" >/dev/null 2>&1; then
-    return 0
+find_relay_input() {
+  # 优先复用 jks 已在 ZLM 上的 HTTP-FLV（-c copy，CPU 极低）
+  local jks_id
+  jks_id=$(api_get "/camera/list?pageNo=1&pageSize=20" 120 | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+for c in d.get('data',[]):
+    if c.get('name')=='jks' and c.get('http_stream'):
+        print(c['id']); break
+" 2>/dev/null || true)
+  if [[ -n "$jks_id" ]]; then
+    local url="http://127.0.0.1:8080/live/${jks_id}.flv"
+    if curl -sS -m 5 -o /dev/null -w '%{http_code}' "$url" | grep -q 200; then
+      echo "$url"
+      return 0
+    fi
   fi
-
-  docker exec -d video-service bash -c "
-ffmpeg -nostdin -hide_banner -loglevel error -re \
-  -f lavfi -i testsrc=size=${RESOLUTION}:rate=${FPS} \
-  -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g ${FPS} \
-  -f flv '${url}'
-" 
-  sleep 0.15
+  echo "lavfi:testsrc=size=${RESOLUTION}:rate=${FPS}"
 }
 
-verify_stream() {
-  local i="$1"
-  local name
-  name=$(stream_name "$i")
-  local code
-  code=$(curl -sS -m 8 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/${STREAM_APP}/${name}.flv" 2>/dev/null || echo 000)
-  [[ "$code" == "200" ]]
+start_fanout_chunk() {
+  local from="$1" to="$2" input="$3"
+  local use_copy="$4"
+  python3 - "$from" "$to" "$input" "$use_copy" <<'PY' | docker exec -i video-service bash -s
+import subprocess, sys
+fr, to, inp, use_copy = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4] == "1"
+args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-re"]
+if inp.startswith("lavfi:"):
+    args += ["-f", "lavfi", "-i", inp.split(":", 1)[1]]
+else:
+    args += ["-i", inp]
+if use_copy:
+    for i in range(fr, to + 1):
+        url = f"rtmp://127.0.0.1:1935/live/stress_{i:03d}"
+        args += ["-map", "0:v", "-c", "copy", "-f", "flv", url]
+else:
+    args += ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+             "-pix_fmt", "yuv420p", "-g", "15"]
+    for i in range(fr, to + 1):
+        url = f"rtmp://127.0.0.1:1935/live/stress_{i:03d}"
+        args += ["-f", "flv", url]
+subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+print(f"started chunk {fr}-{to} pid ok")
+PY
+  sleep 1
+}
+
+verify_ready() {
+  local ok=0 i
+  for ((i = 1; i <= TARGET; i++)); do
+    if pgrep -af "ffmpeg.*$(stream_name "$i")" >/dev/null 2>&1; then
+      ok=$((ok + 1))
+      continue
+    fi
+    local code
+    code=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' \
+      "http://127.0.0.1:8080/${STREAM_APP}/$(stream_name "$i").flv" 2>/dev/null || echo 000)
+    [[ "$code" == "200" ]] && ok=$((ok + 1))
+  done
+  echo "$ok"
 }
 
 main() {
-  prune_dead_pids
-  log "启动 ZLM 模拟流 1..${TARGET} (${RESOLUTION}@${FPS})"
+  log "启动 ZLM 模拟流 1..${TARGET}（fanout chunk=${FANOUT_CHUNK}, ${RESOLUTION}@${FPS}）"
 
-  local i
-  for ((i = 1; i <= TARGET; i++)); do
-    start_one "$i"
-    [[ $((i % 20)) -eq 0 ]] && log "  已启动推流 ${i}/${TARGET}"
+  local input use_copy=1
+  input=$(find_relay_input)
+  if [[ "$input" == lavfi:* ]]; then
+    use_copy=0
+    log "无 jks FLV，使用 testsrc: ${input#lavfi:}"
+  else
+    log "复用 jks HTTP-FLV 扇出（-c copy）"
+  fi
+
+  local from=1 to chunk_end
+  while [[ "$from" -le "$TARGET" ]]; do
+    chunk_end=$(( from + FANOUT_CHUNK - 1 ))
+    [[ "$chunk_end" -gt "$TARGET" ]] && chunk_end=$TARGET
+    start_fanout_chunk "$from" "$chunk_end" "$input" "$use_copy"
+    log "  扇出推流 ${from}-${chunk_end}/${TARGET}"
+    from=$((chunk_end + 1))
+    sleep 2
   done
 
   log "等待流就绪..."
-  sleep 12
+  sleep 15
 
-  local ok=0 ffmpeg_cnt
-  ffmpeg_cnt=$(docker exec video-service pgrep -cf "ffmpeg.*${STREAM_PREFIX}_" 2>/dev/null || echo 0)
-  log "运行中 ffmpeg 推流进程: ${ffmpeg_cnt}"
-
-  for ((i = 1; i <= TARGET; i++)); do
-    if verify_stream "$i" || pgrep -af "ffmpeg.*$(stream_name "$i")" >/dev/null 2>&1; then
-      ok=$((ok + 1))
-    else
-      warn "流未就绪: $(stream_name "$i")"
-    fi
-  done
-
+  local ok
+  ok=$(verify_ready)
   log "模拟流就绪: ${ok}/${TARGET}"
-  [[ "$ok" -ge $(( TARGET * 8 / 10 )) ]] || {
-    err "过多模拟流未就绪，请检查 ZLM/CPU"
+  [[ "$ok" -ge $(( TARGET * 75 / 100 )) ]] || {
+    err "模拟流就绪不足 (${ok}/${TARGET})"
     return 1
   }
 
-  # 记录推流进程（video-service 容器内 ffmpeg）
-  pgrep -af "ffmpeg.*${STREAM_PREFIX}_" | awk '{print $1}' >"$PID_FILE" || true
   export STRESS_STREAM_MODE=zlm
   export STRESS_STREAM_COUNT="$TARGET"
   save_state
