@@ -75,6 +75,6 @@ scripts/deploy/        安装、验证、PoC 验收脚本
 
 | 仓库 | 说明 |
 |------|------|
-| `easyaiot-lite` | 3060 单机精简演示版 |
+| `easyaiot-lite` | 3060 单机精简演示版 | [jlhhb/easyaiot-lite](https://github.com/jlhhb/easyaiot-lite) |
 | `easyaiot-iot` | 南向传感器 + 北向告警 API |
 | `easyaiot-license` | 商用授权控制 |
