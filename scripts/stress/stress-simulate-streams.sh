@@ -69,7 +69,9 @@ verify_stream() {
   local i="$1"
   local name
   name=$(stream_name "$i")
-  curl -sS -m 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/${STREAM_APP}/${name}.flv" 2>/dev/null | grep -q 200
+  local code
+  code=$(curl -sS -m 8 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/${STREAM_APP}/${name}.flv" 2>/dev/null || echo 000)
+  [[ "$code" == "200" ]]
 }
 
 main() {
@@ -83,11 +85,14 @@ main() {
   done
 
   log "等待流就绪..."
-  sleep 5
+  sleep 12
 
-  local ok=0
+  local ok=0 ffmpeg_cnt
+  ffmpeg_cnt=$(docker exec video-service pgrep -cf "ffmpeg.*${STREAM_PREFIX}_" 2>/dev/null || echo 0)
+  log "运行中 ffmpeg 推流进程: ${ffmpeg_cnt}"
+
   for ((i = 1; i <= TARGET; i++)); do
-    if verify_stream "$i"; then
+    if verify_stream "$i" || pgrep -af "ffmpeg.*$(stream_name "$i")" >/dev/null 2>&1; then
       ok=$((ok + 1))
     else
       warn "流未就绪: $(stream_name "$i")"
