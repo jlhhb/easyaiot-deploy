@@ -104,7 +104,10 @@ list_stress_device_ids() {
 import sys,json
 pfx='${CAMERA_PREFIX}'
 d=json.load(sys.stdin)
-ids=[c['id'] for c in d.get('data',[]) if str(c.get('name','')).startswith(pfx)]
+ids=sorted(
+  [c['id'] for c in d.get('data',[]) if str(c.get('name','')).startswith(pfx)],
+  key=lambda x: x
+)
 print(' '.join(ids))
 "
 }

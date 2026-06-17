@@ -45,10 +45,17 @@ append_report() {
 run_tier() {
   local n="$1"
   log "======== 档位: ${n} 路 ========"
-  "${SCRIPT_DIR}/stress-scale.sh" "$n"
+  if ! "${SCRIPT_DIR}/stress-scale.sh" "$n"; then
+    err "档位 ${n} 扩路失败"
+    return 1
+  fi
 
   load_state
   local tid="$STRESS_TASK_ID"
+  if [[ -z "$tid" ]]; then
+    err "无压测任务 ID"
+    return 1
+  fi
   local stall=0 prev="" rounds=$((HOLD / MONITOR_INTERVAL))
   local i g0 g1 m0 m1 delta frames
 

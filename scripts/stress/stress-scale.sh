@@ -25,17 +25,21 @@ print(sum(1 for c in d.get('data',[]) if str(c.get('name','')).startswith(pfx)))
 
   STRESS_RTSP_URL="${STRESS_RTSP_URL:-$(get_rtsp_source)}"
   log "注册压测摄像头 ${current} -> ${need} ..."
-  local i name payload resp
+  local i name payload resp base_rtsp
+  base_rtsp="${STRESS_RTSP_URL%%\?*}"
   for ((i = current + 1; i <= need; i++)); do
     name=$(printf "%s%03d" "$CAMERA_PREFIX" "$i")
+    # 每路唯一 source，避免平台按 RTSP 去重合并为单设备
+    local unique_source="${base_rtsp}?easyaiot_stress=${i}"
     payload=$(python3 -c "
 import json
 print(json.dumps({
   'name': '${name}',
   'cameraType': 'custom',
-  'source': '''${STRESS_RTSP_URL}''',
+  'source': '''${unique_source}''',
   'manufacturer': 'EasyAIoT',
-  'model': 'StressTest'
+  'model': 'StressTest',
+  'serial_number': 'STRESS-SN-${i}'
 }))
 ")
     resp=$(api_post "/camera/register/device" "$payload")
@@ -47,6 +51,7 @@ print(json.dumps({
     sleep 0.2
   done
   REGISTERED_COUNT="$need"
+  sleep_after_register "$need"
   log "注册完成: ${need} 路"
 }
 
@@ -57,6 +62,14 @@ import sys,json
 ids=[l.strip() for l in sys.stdin if l.strip()]
 print(json.dumps(ids))
 "
+}
+
+sleep_after_register() {
+  local n="$1"
+  local wait_sec=$(( 2 + n / 8 ))
+  [[ "$wait_sec" -gt 15 ]] && wait_sec=15
+  log "等待 ${wait_sec}s 设备入库..."
+  sleep "$wait_sec"
 }
 
 ensure_task() {
