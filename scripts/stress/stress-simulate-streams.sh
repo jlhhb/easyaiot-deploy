@@ -36,7 +36,7 @@ for c in d.get('data',[]):
 " 2>/dev/null || true)
   if [[ -n "$jks_id" ]]; then
     local url="http://127.0.0.1:8080/live/${jks_id}.flv"
-    if curl -sS -m 5 -o /dev/null -w '%{http_code}' "$url" | grep -q 200; then
+    if curl -sS -m 15 -o /dev/null -w '%{http_code}' "$url" | grep -q 200; then
       echo "$url"
       return 0
     fi
@@ -45,29 +45,23 @@ for c in d.get('data',[]):
 }
 
 start_fanout_chunk() {
-  local from="$1" to="$2" input="$3"
-  local use_copy="$4"
-  python3 - "$from" "$to" "$input" "$use_copy" <<'PY' | docker exec -i video-service bash -s
-import subprocess, sys
-fr, to, inp, use_copy = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4] == "1"
-args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-re"]
-if inp.startswith("lavfi:"):
-    args += ["-f", "lavfi", "-i", inp.split(":", 1)[1]]
-else:
-    args += ["-i", inp]
-if use_copy:
-    for i in range(fr, to + 1):
-        url = f"rtmp://127.0.0.1:1935/live/stress_{i:03d}"
-        args += ["-map", "0:v", "-c", "copy", "-f", "flv", url]
-else:
-    args += ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-             "-pix_fmt", "yuv420p", "-g", "15"]
-    for i in range(fr, to + 1):
-        url = f"rtmp://127.0.0.1:1935/live/stress_{i:03d}"
-        args += ["-f", "flv", url]
-subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-print(f"started chunk {fr}-{to} pid ok")
-PY
+  local from="$1" to="$2" input="$3" use_copy="$4"
+  local cmd="ffmpeg -nostdin -hide_banner -loglevel error -re"
+  if [[ "$input" == lavfi:* ]]; then
+    cmd+=" -f lavfi -i ${input#lavfi:}"
+    cmd+=" -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 15"
+    local i
+    for ((i = from; i <= to; i++)); do
+      cmd+=" -f flv $(stream_rtmp "$i")"
+    done
+  else
+    cmd+=" -i ${input}"
+    local i
+    for ((i = from; i <= to; i++)); do
+      cmd+=" -map 0:v -c copy -f flv $(stream_rtmp "$i")"
+    done
+  fi
+  docker exec -d video-service bash -c "$cmd"
   sleep 1
 }
 
