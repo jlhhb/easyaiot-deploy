@@ -28,6 +28,12 @@ sudo ./scripts/deploy/preflight.sh
 ./scripts/deploy/poc-functional-test.sh
 ```
 
+**干净机全量 install 复测：**
+
+```bash
+./scripts/deploy/clean-install-retest.sh   # 见 docs/deploy/clean-install-retest.md
+```
+
 浏览器访问：`http://<服务器IP>:8888`（默认账号见《用户手册》）
 
 ## 目录结构
@@ -46,6 +52,7 @@ scripts/deploy/        安装、验证、PoC 验收脚本
 | [PoC 部署清单](docs/deploy/poc-deployment-checklist.md) | 32 路目标、压测表、验收项 |
 | [PoC 功能测试](docs/deploy/poc-functional-test.md) | API 示例、4090 实测记录 |
 | [火眼参数对照](docs/deploy/huoyan-to-easyaiot-param-mapping.md) | 火眼 → EasyAIoT 参数映射 |
+| [干净机 Install 复测](docs/deploy/clean-install-retest.md) | 从零安装验收方案与检查表 |
 
 ## 完成度（子任务 1）
 
@@ -55,7 +62,8 @@ scripts/deploy/        安装、验证、PoC 验收脚本
 | PoC 验收脚本 poc-functional-test | ✅ |
 | 部署与用户手册 | ✅ |
 | 4090 环境 verify + 1 路烟火任务 | ✅ |
-| 干净机全量 install 复测 | ⬜ 待做 |
+| 干净机 install 复测方案 + 脚本 | ✅ |
+| 干净机全量 install 实测 | ⬜ 待执行 |
 | 32 路压测 / 24h 报告 | ⬜ 待做 |
 
 ## 上游与许可
