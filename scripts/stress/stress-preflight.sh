@@ -9,7 +9,9 @@ main() {
   log "=== EasyAIoT 压测预检 ==="
   health_gate "预检"
 
-  STRESS_RTSP_URL="$(get_rtsp_source)"
+  load_state
+  export STRESS_STREAM_MODE=zlm
+  STRESS_RTSP_URL="$(get_rtsp_source 2>/dev/null || true)"
   log "RTSP 源: ${STRESS_RTSP_URL%%@*}@***"
 
   POC_TASK_ID="${POC_TASK_ID:-1}"

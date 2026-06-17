@@ -71,6 +71,9 @@ for t in d.get('data',[]):
 
   POC_TASK_WAS_RUNNING=0
   save_state
+
+  "${SCRIPT_DIR}/stress-stop-streams.sh" 2>/dev/null || true
+
   log "=== 清理完成，环境已释放 ==="
 }
 

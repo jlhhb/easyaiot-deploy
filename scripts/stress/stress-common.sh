@@ -54,10 +54,24 @@ save_state() {
   cat >"$STATE_FILE" <<EOF
 STRESS_TASK_ID=${STRESS_TASK_ID:-}
 STRESS_RTSP_URL=${STRESS_RTSP_URL:-}
+STRESS_STREAM_MODE=${STRESS_STREAM_MODE:-zlm}
+STRESS_STREAM_COUNT=${STRESS_STREAM_COUNT:-0}
 POC_TASK_ID=${POC_TASK_ID:-1}
 POC_TASK_WAS_RUNNING=${POC_TASK_WAS_RUNNING:-0}
 REGISTERED_COUNT=${REGISTERED_COUNT:-0}
 EOF
+}
+
+stress_stream_source() {
+  local i="$1"
+  local mode="${STRESS_STREAM_MODE:-zlm}"
+  if [[ "$mode" == "zlm" ]]; then
+    echo "rtmp://127.0.0.1:1935/live/stress_$(printf '%03d' "$i")"
+  else
+    local base="${STRESS_RTSP_URL:-$(get_rtsp_source)}"
+    base="${base%%\?*}"
+    echo "${base}?easyaiot_stress=${i}"
+  fi
 }
 
 health_gate() {

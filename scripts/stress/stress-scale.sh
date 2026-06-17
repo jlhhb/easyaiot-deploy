@@ -23,14 +23,19 @@ print(sum(1 for c in d.get('data',[]) if str(c.get('name','')).startswith(pfx)))
     return
   fi
 
-  STRESS_RTSP_URL="${STRESS_RTSP_URL:-$(get_rtsp_source)}"
+  # ZLM 模拟流模式：先推流再注册
+  if [[ "${STRESS_STREAM_MODE:-zlm}" == "zlm" ]]; then
+    "${SCRIPT_DIR}/stress-simulate-streams.sh" "$need"
+    load_state
+  else
+    STRESS_RTSP_URL="${STRESS_RTSP_URL:-$(get_rtsp_source)}"
+  fi
+
   log "注册压测摄像头 ${current} -> ${need} ..."
-  local i name payload resp base_rtsp
-  base_rtsp="${STRESS_RTSP_URL%%\?*}"
+  local i name payload resp unique_source
   for ((i = current + 1; i <= need; i++)); do
     name=$(printf "%s%03d" "$CAMERA_PREFIX" "$i")
-    # 每路唯一 source，避免平台按 RTSP 去重合并为单设备
-    local unique_source="${base_rtsp}?easyaiot_stress=${i}"
+    unique_source=$(stress_stream_source "$i")
     payload=$(python3 -c "
 import json
 print(json.dumps({
