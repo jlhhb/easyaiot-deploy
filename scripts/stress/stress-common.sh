@@ -66,7 +66,7 @@ stress_stream_source() {
   local i="$1"
   local mode="${STRESS_STREAM_MODE:-zlm}"
   if [[ "$mode" == "zlm" ]]; then
-    echo "rtmp://127.0.0.1:1935/live/stress_$(printf '%03d' "$i")"
+    echo "rtsp://127.0.0.1:5540/live/stress_$(printf '%03d' "$i")"
   else
     local base="${STRESS_RTSP_URL:-$(get_rtsp_source)}"
     base="${base%%\?*}"
